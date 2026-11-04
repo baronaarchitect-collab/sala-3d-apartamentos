@@ -51,7 +51,8 @@ export function construirTorre(S, opts = {}) {
   const g = new THREE.Group(); g.name = 'torre';
   const pisos = [...(S.pisos || [])].sort((a, b) => (+a.nivel || 0) - (+b.nivel || 0));
   const base = pisos.length ? Math.min(...pisos.map(p => +p.nivel || 0)) : 1;
-  const lobby = alto * 1.35;
+  const lobby = +opts.lobby || alto * 1.35;
+  const est = new THREE.Group(); est.name = 'estructura'; g.add(est);
   const losaMat = new THREE.MeshStandardMaterial({ color: opts.losa || '#ece6dc', roughness: 0.85 });
   const nucleoMat = new THREE.MeshStandardMaterial({ color: opts.fachada || '#2b2a27', roughness: 0.6, metalness: 0.1 });
   const vidrioMat = new THREE.MeshStandardMaterial({ color: 0x9fb7c4, roughness: 0.08, metalness: 0.2, transparent: true, opacity: 0.35 });
@@ -64,8 +65,8 @@ export function construirTorre(S, opts = {}) {
     const b = bbox(pl0.aptos.map(a => a.poly)); bAll = b;
     const w = (b.x1 - b.x0) * esc.W, d = (b.y1 - b.y0) * esc.D;
     const cx = ((b.x0 + b.x1) / 2 - 0.5) * esc.W, cz = ((b.y0 + b.y1) / 2 - 0.5) * esc.D;
-    const lb = new THREE.Mesh(new THREE.BoxGeometry(w * 0.96, lobby - 0.3, d * 0.96), vidrioMat); lb.position.set(cx, (lobby - 0.3) / 2, cz); g.add(lb);
-    const lf = new THREE.Mesh(new THREE.BoxGeometry(w * 0.4, lobby - 0.3, d * 0.4), nucleoMat); lf.position.set(cx, (lobby - 0.3) / 2, cz); g.add(lf);
+    const lb = new THREE.Mesh(new THREE.BoxGeometry(w * 0.96, lobby - 0.3, d * 0.96), vidrioMat); lb.position.set(cx, (lobby - 0.3) / 2, cz); est.add(lb);
+    const lf = new THREE.Mesh(new THREE.BoxGeometry(w * 0.4, lobby - 0.3, d * 0.4), nucleoMat); lf.position.set(cx, (lobby - 0.3) / 2, cz); est.add(lf);
   }
 
   pisos.forEach(piso => {
@@ -75,10 +76,10 @@ export function construirTorre(S, opts = {}) {
     const w = (b.x1 - b.x0) * esc.W, d = (b.y1 - b.y0) * esc.D;
     const cx = ((b.x0 + b.x1) / 2 - 0.5) * esc.W, cz = ((b.y0 + b.y1) / 2 - 0.5) * esc.D;
     const losa = new THREE.Mesh(new THREE.BoxGeometry(w + 0.5, 0.28, d + 0.5), losaMat);
-    losa.position.set(cx, y - 0.14, cz); losa.receiveShadow = true; losa.castShadow = true; g.add(losa);
+    losa.position.set(cx, y - 0.14, cz); losa.receiveShadow = true; losa.castShadow = true; est.add(losa);
     // núcleo de circulación (lo que queda entre aptos)
     const nc = new THREE.Mesh(new THREE.BoxGeometry(w * 0.3, alto - 0.3, d * 0.3), nucleoMat);
-    nc.position.set(cx, y + (alto - 0.3) / 2, cz); g.add(nc);
+    nc.position.set(cx, y + (alto - 0.3) / 2, cz); est.add(nc);
 
     pl.aptos.forEach(a => {
       const u = (S.unidades || []).find(x => x.piso === piso.id && String(x.apto) === String(a.n));
@@ -101,21 +102,27 @@ export function construirTorre(S, opts = {}) {
     const b = bbox(plU.aptos.map(a => a.poly));
     const w = (b.x1 - b.x0) * esc.W, d = (b.y1 - b.y0) * esc.D;
     const cub = new THREE.Mesh(new THREE.BoxGeometry(w + 0.5, 0.35, d + 0.5), losaMat);
-    cub.position.set(((b.x0 + b.x1) / 2 - 0.5) * esc.W, topY + 0.02, ((b.y0 + b.y1) / 2 - 0.5) * esc.D); g.add(cub);
+    cub.position.set(((b.x0 + b.x1) / 2 - 0.5) * esc.W, topY + 0.02, ((b.y0 + b.y1) / 2 - 0.5) * esc.D); est.add(cub);
   }
 
+  /* sobre un modelo real del edificio las unidades son volúmenes translúcidos que se pueden tocar;
+     vol: 'siempre' (se ven todas) | 'hover' (solo la que se toca o se elige) */
+  let sobreModelo = false, vol = 'siempre';
   function refrescar(seleccion, hover) {
     unidades.forEach(m => {
       const u = m.userData.unidad, mat = m.material;
-      mat.color.setHex(COLORES[u.estado] || COLORES.vendido);
-      mat.opacity = u.estado === 'vendido' ? 0.55 : 0.92;
       const on = m === seleccion, hv = m === hover;
-      mat.emissive.setHex(on ? 0xffffff : hv ? 0xffffff : 0x000000);
+      mat.color.setHex(COLORES[u.estado] || COLORES.vendido);
+      let op = u.estado === 'vendido' ? 0.55 : 0.92;
+      if (sobreModelo) op = (on || hv) ? 0.75 : vol === 'hover' ? 0 : (u.estado === 'disponible' ? 0.42 : 0.22);
+      mat.opacity = op; mat.depthWrite = !sobreModelo;
+      mat.emissive.setHex(on || hv ? 0xffffff : 0x000000);
       mat.emissiveIntensity = on ? 0.32 : hv ? 0.16 : 0;
-      m.children[0].material.opacity = on ? 1 : 0.35;
+      m.children[0].material.opacity = sobreModelo ? (on ? 1 : (vol === 'hover' && !hv ? 0 : 0.25)) : (on ? 1 : 0.35);
     });
   }
+  function modoModelo(on, v) { sobreModelo = !!on; vol = v || 'siempre'; est.visible = !on; }
   refrescar();
   const radio = Math.max(esc.W, esc.D, topY) * 0.75;
-  return { group: g, unidades, refrescar, esc, alto: topY, radio, centro: new THREE.Vector3(0, topY / 2, 0) };
+  return { group: g, estructura: est, unidades, refrescar, modoModelo, esc, alto: topY, lobby, altoPiso: alto, radio, centro: new THREE.Vector3(0, topY / 2, 0) };
 }

@@ -14,13 +14,16 @@ como en el recorrido de La Vista de San Eduardo.
 | Paso | Dónde | Qué pasa |
 | --- | --- | --- |
 | 1 · Elige la sala | `index.html` | Demo publicado, **tus proyectos del asistente de Inicio-bim** (mismo navegador) o cualquier sala publicada por link. |
-| 2 · Arma el edificio | `index.html` | Los pisos de la fachada se apilan con su planta; cada apto de la planta (el mismo polígono de la sala) es un volumen 3D a escala real (sale del área en m²). |
-| 3 · Asigna los apartamentos | `index.html` | Por tipología: modelo tipo de referencia (Unreal, San Eduardo), GLB propio por link, GLB subido al navegador o **generado desde la planta** (muros, ventanas, alcobas, baño y mobiliario). |
-| 4 · Conecta y comparte | `index.html` | Guarda el link como *Link del recorrido 3D* de la sala → la fachada y la ficha del apto muestran **Ver recorrido en 3D**. Link público e iframe para la web. |
+| 2 · Modelo del edificio | `index.html` → *Encajar* | Opcional: sube el **IFC** (o GLB, OBJ, FBX) del edificio completo. Se encaja solo por altura y luego lo mueves, giras y escalas, y ajustas la altura de piso y del primer piso hasta que cada volumen de la sala quede sobre su apartamento. Las unidades se ven translúcidas encima del modelo (o solo al tocarlas). |
+| 3 · Modelo por tipología | `index.html` → *Configurar recorrido* | Cada planta de la sala es una tipología: modelo de referencia, generado desde la planta o **tu modelo** (IFC, GLB, OBJ, FBX). Con tu modelo el asistente pregunta: ¿tamaño real (m, cm, mm, pulgadas)?, ¿a qué altura está el piso?, ¿qué espacios tiene? y, para cada uno, dónde se para el comprador y hacia dónde mira. Con IfcSpace los espacios salen solos. |
+| 4 · Preguntas, agenda y CRM | `index.html` | Preguntas del chat por tipo de espacio (`Pregunta = opción / opción`), días y horas de la sala, asesor y WhatsApp. CRM: **Life City** (Firestore), **HubSpot** (Portal ID + Form ID) y **webhook** para cualquier otro (Pipedrive, Salesforce, Zoho, Sheets, Make, Zapier, n8n). Botón de cita de prueba. |
+| 5 · Conecta y publica | `index.html` | Guarda el link como *Link del recorrido 3D* de la sala. Link público, iframe, o **carpeta .zip** (`app.json` + `sala.json` + `modelos/`) para subir a `apps/` cuando hay modelos subidos. |
 
-**Comprador** (`visor.html`): edificio → toca una unidad (color = estado) → ficha con precio y separación →
-**Entrar al apartamento** → caminar por espacios, **Medir** (con "¿cabe tu mueble?"), **Pintar** con la paleta del proyecto,
-**Maqueta** sin techo, decisiones arquitectónicas → **Agendar cita** por WhatsApp con la ficha (unidad, espacios y medidas).
+**Comprador** (`visor.html`): edificio (con el modelo real si lo hay) → toca una unidad → ficha con precio y separación →
+**Entrar al apartamento** (modelo de su tipología) → caminar por espacios, **Medir** (con "¿cabe tu mueble?"), **Pintar** con la paleta,
+**Maqueta** sin techo. El **asistente (chat)** pregunta para qué busca, hace la pregunta de cada espacio que visita y recibe comentarios libres.
+Desde adentro: **← 3D general**, **Renders y plantas ↗** (la sala) y **Agendar cita**. La cita envía a los CRM activos la unidad,
+los espacios visitados, las respuestas, las medidas, los acabados probados y los comentarios; el comprador puede mandarla también por WhatsApp.
 
 ## Conexión con la sala de ventas
 
@@ -38,12 +41,20 @@ La app no copia el inventario: carga el mismo motor de la sala desde `Inicio-bim
 | `visor.html` | Demo Torre Alborada |
 | `visor.html?app=<key>` | App guardada en este navegador (vista previa del dashboard) |
 | `visor.html?c=<config>` | App publicada: la configuración viaja en el link, funciona en cualquier equipo |
+| `visor.html?cfg=apps/<proyecto>/app.json` | App publicada como carpeta (con sus modelos IFC/GLB) |
 | `…&apto=1203` | Abre con esa unidad elegida · `&entrar=1` entra directo al apartamento |
+
+## Datos que recibe el CRM
+
+Webhook: `POST` JSON con `evento: "cita_sala_ventas"`, `resumen` (texto), `cliente {nombre, celular, correo}`, `cita {fecha, hora, iso, modalidad, nota}`,
+`unidad {id, piso, area, alcobas, banos, precio, estado}` y `recorrido {perfil, minutos, unidadesVistas, espacios[], respuestas[], medidas[], acabados[], notas[]}`.
+HubSpot recibe `firstname`, `lastname`, `email`, `phone` y el resumen en `message`. Life City recibe el lead en `leads` con el resumen en `mensaje`.
 
 ## Modelos 3D
 
 - `modelos/apto-tipo.glb`: apartamento tipo real (exportado de Unreal y optimizado, 6,6 MB) con sus vistas por espacio.
-- Para cada tipología propia exporta a `.glb` (Unreal, 3ds Max, Revit, SketchUp), optimiza con `gltf-transform optimize`, súbelo a `modelos/` y pega su link en el dashboard.
+- IFC se lee en el navegador con web-ifc 0.0.77 (geometría, colores, IfcSpace y pisos). Un IFC de 30 MB tarda ~30 s en abrir: para compradores en celular publica mejor un GLB.
+- Revit: para una tipología exporta solo el apartamento (vista 3D con caja de sección → IFC). Unreal, 3ds Max, SketchUp → GLB; optimiza con `gltf-transform optimize`.
 
 ## Local
 
@@ -61,6 +72,8 @@ Abre http://localhost:5180. En local los proyectos del asistente de Inicio-bim n
 | `visor.html`, `js/visor.js`, `css/visor.css` | App del comprador: edificio, unidades, interior, herramientas, ficha |
 | `js/fuente.js` | Conexión con la sala (motor de Inicio-bim, overlay, Firebase, proyectos locales) y apps guardadas |
 | `js/torre.js` | Edificio 3D desde pisos y plantas de la sala |
-| `js/interior.js` | Interior: modelo de referencia, GLB propio o generado desde la planta |
+| `js/interior.js` | Interior: modelo de referencia, modelo propio (con vistas y nivel de piso) o generado desde la planta |
+| `js/modelos.js` | Carga IFC (web-ifc), GLB/glTF, OBJ y FBX; limpieza de materiales y escala |
+| `js/crm.js` | Envío de la cita: Life City, HubSpot, webhook y resumen para WhatsApp |
 
 Three.js 0.160 desde jsDelivr, sin build.

@@ -6,7 +6,7 @@
  * Devuelve {group, vistas:{id:{n, eye, look}}, cuartos:{id:[x0,x1,z0,z1]}, piso, techo}
  */
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { cargarModelo, limpiar, escalaSugerida } from './modelos.js';
 import { aMundo } from './torre.js';
 
 export const REFERENCIA = {
@@ -24,52 +24,90 @@ export const REFERENCIA = {
   nombres: { bano: 'Baño', bano2: 'Baño social' }
 };
 
-const cacheGLB = {};
-function cargarGLB(url) {
-  if (!cacheGLB[url]) cacheGLB[url] = new Promise((res, rej) => new GLTFLoader().load(url, g => res(g.scene), undefined, rej));
-  return cacheGLB[url].then(s => s.clone(true));
+const cache = {};
+function cargarCache(src) {
+  const k = src.blob ? null : src.url;
+  if (!k) return cargarModelo(src);
+  if (!cache[k]) cache[k] = cargarModelo(src);
+  return cache[k].then(r => Object.assign({}, r, { scene: r.scene.clone(true) }));
 }
 
+/* modelo: {tipo:'referencia'|'planta'|'url'|'archivo', url, nombre, escala, vistas, cuartos}
+   ctx: {apto, esc, unidad, paleta, blob, base} */
 export async function cargarInterior(modelo, ctx) {
   const tipo = (modelo && modelo.tipo) || 'referencia';
   if (tipo === 'planta') return generarDesdePlanta(ctx);
   if (tipo === 'referencia') {
-    const scene = await cargarGLB(new URL(REFERENCIA.url, location.href).href);
-    return envolver(scene, REFERENCIA.vistas, REFERENCIA.cuartos, REFERENCIA.nombres, REFERENCIA.nombre);
+    const r = await cargarCache({ url: new URL(REFERENCIA.url, location.href).href, nombre: 'apto.glb' });
+    return envolver(r, 1, REFERENCIA.vistas, REFERENCIA.cuartos, REFERENCIA.nombres, REFERENCIA.nombre);
   }
-  let url = modelo.url;
+  let src;
   if (tipo === 'archivo') {
-    const blob = ctx.blob; if (!blob) throw new Error('El modelo subido no está en este navegador.');
-    url = URL.createObjectURL(blob);
+    if (!ctx.blob) throw new Error('El modelo subido no está en este navegador.');
+    src = { blob: ctx.blob, nombre: modelo.nombre || 'modelo.glb' };
+  } else {
+    if (!modelo.url) throw new Error('La tipología no tiene modelo 3D.');
+    src = { url: new URL(modelo.url, ctx.base || location.href).href, nombre: modelo.nombre || modelo.url };
   }
-  if (!url) throw new Error('La tipología no tiene modelo 3D.');
-  const scene = await cargarGLB(url);
-  return envolver(scene, null, null, {}, 'Modelo 3D de la tipología');
+  const r = await cargarCache(src);
+  const esc = +modelo.escala || escalaSugerida(r.scene);
+  const I = envolver(r, esc, modelo.vistas, modelo.cuartos, modelo.nombres, modelo.nombre ? 'Modelo ' + modelo.nombre : 'Modelo 3D de la tipología');
+  I.piso = modelo.piso != null ? +modelo.piso : detectarPiso(I.group, I.box);
+  if (!modelo.vistas && !(r.espacios || []).length) Object.values(I.vistas).forEach(v => { v.eye[1] = I.piso + 1.6; v.look[1] = I.piso + 1.3; });
+  return I;
 }
 
-function envolver(scene, vistas, cuartos, nombres, etiqueta) {
-  const g = new THREE.Group(); g.add(scene);
-  scene.traverse(o => {
-    if (!o.isMesh) return;
-    o.castShadow = false; o.receiveShadow = false;
-    // los normal maps sin textura base (perfiles, paneles exportados de Unreal/V-Ray) salen como ruido sin tangentes: se quitan
-    (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
-      if (m && m.normalMap && !m.map) { m.normalMap = null; m.needsUpdate = true; }
+/* nivel del piso habitable: la superficie horizontal más baja que cubre buena parte de la planta
+   (así no se toma una zapata o un foso como piso) */
+export function detectarPiso(group, box) {
+  const rc = new THREE.Raycaster(), s = box.getSize(new THREE.Vector3()), n = 9, cuenta = {};
+  let rayos = 0;
+  for (let i = 1; i < n; i++) for (let j = 1; j < n; j++) {
+    const x = box.min.x + s.x * i / n, z = box.min.z + s.z * j / n;
+    rc.set(new THREE.Vector3(x, box.max.y + 1, z), new THREE.Vector3(0, -1, 0));
+    const hits = rc.intersectObject(group, true); if (!hits.length) continue;
+    rayos++;
+    const vistos = new Set();
+    hits.forEach(h => {
+      const nm = h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld) : null;
+      if (!nm || Math.abs(nm.y) < 0.8) return;
+      const k = Math.round(h.point.y * 10) / 10; if (vistos.has(k)) return; vistos.add(k);
+      cuenta[k] = (cuenta[k] || 0) + 1;
     });
-  });
-  const box = new THREE.Box3().setFromObject(scene);
-  if (!vistas) {
-    // GLB sin vistas: un punto en el centro mirando al lado largo + esquinas
-    const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3()), y = box.min.y + 1.6;
-    const lx = s.x >= s.z;
-    vistas = {
-      centro: { n: 'Centro', eye: [c.x, y, c.z], look: lx ? [box.max.x, y - 0.3, c.z] : [c.x, y - 0.3, box.max.z] },
-      a: { n: 'Extremo A', eye: lx ? [box.min.x + s.x * 0.2, y, c.z] : [c.x, y, box.min.z + s.z * 0.2], look: [c.x, y - 0.3, c.z] },
-      b: { n: 'Extremo B', eye: lx ? [box.max.x - s.x * 0.2, y, c.z] : [c.x, y, box.max.z - s.z * 0.2], look: [c.x, y - 0.3, c.z] }
-    };
-    cuartos = {};
   }
-  return { group: g, vistas, cuartos, nombres: nombres || {}, piso: box.min.y, techo: box.max.y, etiqueta, box };
+  const niveles = Object.keys(cuenta).map(Number).sort((a, b) => a - b);
+  const bueno = niveles.find(y => cuenta[y] >= rayos * 0.3 && y < box.min.y + s.y * 0.6);
+  return bueno != null ? bueno : box.min.y;
+}
+
+/* vistas automáticas: una por espacio del IFC, o centro y extremos del modelo */
+export function vistasAuto(r, esc, box) {
+  const vistas = {}, cuartos = {}, nombres = {};
+  const piso = box.min.y;
+  (r.espacios || []).forEach((e, i) => {
+    const b = e.box.clone(); b.min.multiplyScalar(esc); b.max.multiplyScalar(esc);
+    const c = b.getCenter(new THREE.Vector3()), s = b.getSize(new THREE.Vector3());
+    if (s.x < 0.8 || s.z < 0.8) return;
+    const id = 'e' + i, lx = s.x >= s.z;
+    vistas[id] = { n: e.nombre, eye: [c.x, b.min.y + 1.6, c.z], look: lx ? [b.max.x, b.min.y + 1.2, c.z] : [c.x, b.min.y + 1.2, b.max.z] };
+    cuartos[id] = [b.min.x, b.max.x, b.min.z, b.max.z]; nombres[id] = e.nombre;
+  });
+  if (!Object.keys(vistas).length) {
+    const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3()), y = piso + 1.6, lx = s.x >= s.z;
+    vistas.centro = { n: 'Centro', eye: [c.x, y, c.z], look: lx ? [box.max.x, y - 0.3, c.z] : [c.x, y - 0.3, box.max.z] };
+    vistas.a = { n: 'Extremo A', eye: lx ? [box.min.x + s.x * 0.2, y, c.z] : [c.x, y, box.min.z + s.z * 0.2], look: [c.x, y - 0.3, c.z] };
+    vistas.b = { n: 'Extremo B', eye: lx ? [box.max.x - s.x * 0.2, y, c.z] : [c.x, y, box.max.z - s.z * 0.2], look: [c.x, y - 0.3, c.z] };
+  }
+  return { vistas, cuartos, nombres };
+}
+
+function envolver(r, esc, vistas, cuartos, nombres, etiqueta) {
+  const g = new THREE.Group(), cont = new THREE.Group();
+  limpiar(r.scene); cont.add(r.scene); cont.scale.setScalar(esc); g.add(cont);
+  g.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(g);
+  if (!vistas || !Object.keys(vistas).length) ({ vistas, cuartos, nombres } = vistasAuto(r, esc, box));
+  return { group: g, vistas, cuartos: cuartos || {}, nombres: nombres || {}, piso: box.min.y, techo: box.max.y, etiqueta, box, espacios: r.espacios || [] };
 }
 
 /* ---------------- generado desde la planta ---------------- */

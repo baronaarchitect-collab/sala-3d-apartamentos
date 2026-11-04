@@ -9,6 +9,9 @@
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/app.css">
 <link rel="stylesheet" href="css/dashboard.css">
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
 </head>
 <body>
 <header class="bar">
@@ -26,8 +29,8 @@
     <ol class="steps">
       <li><b>1</b><span>Elige la sala</span><small>Demo, tus proyectos o una sala publicada</small></li>
       <li><b>2</b><span>Arma el edificio</span><small>Pisos y aptos salen de las plantas de la sala</small></li>
-      <li><b>3</b><span>Asigna los apartamentos</span><small>Modelo tipo, GLB propio o generado de la planta</small></li>
-      <li><b>4</b><span>Conecta y comparte</span><small>El botón "Ver recorrido en 3D" aparece en la sala</small></li>
+      <li><b>3</b><span>Sube tus modelos</span><small>IFC del edificio y un modelo por tipología</small></li>
+      <li><b>4</b><span>Conecta el CRM y comparte</span><small>La cita llega con el recorrido; el 3D aparece en la sala</small></li>
     </ol>
   </section>
 
@@ -62,11 +65,40 @@
           <div class="inv" id="inv"></div>
         </fieldset>
         <fieldset>
+          <legend>Modelo del edificio completo</legend>
+          <p class="muted small">Opcional. Sube el IFC (o GLB, OBJ, FBX) del edificio y encájalo con los volúmenes que salen de la sala: el comprador ve tu modelo real y toca cada apartamento sobre él.</p>
+          <label class="field">Modelo<select id="f-ed-tipo"><option value="ninguno">Sin modelo: edificio generado desde la sala</option><option value="archivo">Subir archivo a este navegador</option><option value="url">Link del modelo publicado</option></select></label>
+          <label class="field" data-ed="archivo"><span>Archivo (.ifc, .glb, .gltf, .obj, .fbx)</span><input id="f-ed-file" type="file" accept=".ifc,.glb,.gltf,.obj,.fbx"><small id="f-ed-nota"></small></label>
+          <label class="field" data-ed="url"><span>Link del modelo</span><input id="f-ed-url" type="url" placeholder="https://…/edificio.ifc"><small>Súbelo a la carpeta del proyecto en este repo (ver "Publicar como carpeta").</small></label>
+          <div class="actions" data-ed="modelo"><button class="btn ghost sm" type="button" id="b-encajar">Encajar con el 3D de la sala</button><span class="muted small" id="ed-estado"></span></div>
+        </fieldset>
+        <fieldset>
           <legend>Apartamentos por tipología</legend>
-          <p class="muted small">Cada planta de la sala es una tipología. Elige qué ve el comprador cuando entra a un apto de esa planta.</p>
+          <p class="muted small">Cada planta de la sala es una tipología. Elige el modelo que se abre cuando el comprador entra a un apto de esa planta. Con tu propio modelo te hacemos las preguntas para que se pueda recorrer.</p>
           <div id="tipos"></div>
         </fieldset>
-        <div class="actions"><button class="btn" type="submit">Guardar y ver</button><span class="saved muted small" id="saved" role="status"></span></div>
+        <fieldset>
+          <legend>Preguntas del recorrido</legend>
+          <p class="muted small">El asistente las hace en el chat cuando el comprador entra a cada espacio. Una pregunta por línea: <code>Pregunta = opción / opción / opción</code>. Las respuestas llegan con la cita.</p>
+          <label class="field">Pregunta al entrar<input id="f-perfil" placeholder="¿Para qué buscas este apartamento? = Para vivir / Para invertir"></label>
+          <div id="preguntas"></div>
+        </fieldset>
+        <fieldset>
+          <legend>Agenda de la sala de ventas</legend>
+          <div class="dias" id="f-dias" role="group" aria-label="Días de atención"></div>
+          <div class="two">
+            <label class="field">Desde<input id="f-desde" type="time"></label>
+            <label class="field">Hasta<input id="f-hasta" type="time"></label>
+            <label class="field">Cada (min)<select id="f-cada"><option>30</option><option>45</option><option>60</option><option>90</option></select></label>
+          </div>
+          <div class="two">
+            <label class="field">Asesor<input id="f-asesor" placeholder="Nombre"></label>
+            <label class="field">WhatsApp del asesor<input id="f-wa" inputmode="tel" placeholder="57300…"></label>
+            <label class="field">Dirección de la sala<input id="f-dir" placeholder="Opcional"></label>
+          </div>
+          <label class="check"><input type="checkbox" id="f-mod"> <span>Ofrecer cita por videollamada además de presencial</span></label>
+        </fieldset>
+        <div class="actions"><button class="btn" type="submit">Actualizar vista previa</button><span class="saved muted small" id="saved" role="status"></span></div>
       </form>
       <div class="preview">
         <div class="pv-h"><b>Vista previa</b><a class="btn ghost sm" id="a-abrir" href="#" target="_blank" rel="noopener">Abrir la app ↗</a></div>
@@ -76,8 +108,29 @@
     </div>
   </section>
 
+  <section id="crm" class="block" hidden>
+    <div class="sec-h"><h2>3 · CRM y notificaciones</h2><p class="muted">Cuando el comprador agenda, la cita llega con su recorrido: unidad, espacios que vio, respuestas, medidas, acabados y comentarios.</p></div>
+    <div class="cards3">
+      <div class="panel">
+        <label class="check big"><input type="checkbox" id="c-lc"> <span><b>CRM de Life City</b><br><small class="muted">Entra al embudo de leads de inversión (Firestore). Recomendado.</small></span></label>
+        <label class="check big"><input type="checkbox" id="c-wa"> <span><b>WhatsApp del asesor</b><br><small class="muted">Al confirmar, el comprador envía su ficha al WhatsApp de la agenda.</small></span></label>
+      </div>
+      <div class="panel">
+        <h3>HubSpot</h3>
+        <p class="muted small">Crea un formulario en HubSpot (Marketing → Formularios) con nombre, apellido, correo, teléfono y mensaje. Copia el Portal ID y el Form ID de su código de inserción.</p>
+        <div class="two2"><label class="field">Portal ID<input id="c-hs-p" inputmode="numeric" placeholder="12345678"></label><label class="field">Form ID<input id="c-hs-f" placeholder="xxxxxxxx-xxxx-…"></label></div>
+      </div>
+      <div class="panel">
+        <h3>Otro CRM (webhook)</h3>
+        <p class="muted small">Pipedrive, Salesforce, Zoho, Google Sheets, Make, Zapier o n8n: pega la URL del webhook y recibe el JSON completo de la cita.</p>
+        <label class="field">URL del webhook<input id="c-wh" type="url" placeholder="https://hook.us1.make.com/…"></label>
+      </div>
+    </div>
+    <div class="actions" style="margin-top:12px"><button class="btn ghost" type="button" id="b-prueba">Enviar una cita de prueba</button><span class="small" id="m-prueba" role="status"></span></div>
+  </section>
+
   <section id="publicar" class="block" hidden>
-    <div class="sec-h"><h2>3 · Conecta y comparte</h2><p class="muted">El comprador abre la app desde la sala de ventas o desde el link.</p></div>
+    <div class="sec-h"><h2>4 · Conecta y comparte</h2><p class="muted">El comprador abre la app desde la sala de ventas o desde el link.</p></div>
     <div class="cards3">
       <div class="panel">
         <h3>Conectar con la sala de ventas</h3>
@@ -92,6 +145,12 @@
         <p class="muted small">Agrega <code>&amp;apto=1203</code> para abrir con una unidad elegida.</p>
       </div>
       <div class="panel">
+        <h3>Publicar como carpeta</h3>
+        <p class="muted small">Para compartir modelos subidos (IFC, GLB) o una sala que aún no está publicada: descarga la carpeta, súbela a <code>apps/</code> en este repo y usa este link.</p>
+        <button class="btn sm" type="button" id="b-zip">Descargar carpeta (.zip)</button>
+        <div class="copy"><input id="l-cfg" readonly aria-label="Link de la carpeta publicada"><button class="btn sm" type="button" data-copy="l-cfg">Copiar</button></div>
+      </div>
+      <div class="panel">
         <h3>Insertar en tu web</h3>
         <p class="muted small">Pega este código en la página del proyecto.</p>
         <div class="copy"><input id="l-embed" readonly aria-label="Código para insertar"><button class="btn sm" type="button" data-copy="l-embed">Copiar</button></div>
@@ -100,7 +159,9 @@
   </section>
 </main>
 <footer class="wrap foot muted small">Life City BIM Management Hub · Cali, Colombia · conectado con la <a href="https://baronaarchitect-collab.github.io/Inicio-bim/visor/renders/" target="_blank" rel="noopener">sala de ventas con renders</a></footer>
+<div class="tool" id="tool" hidden role="dialog" aria-modal="true" aria-label="Herramienta del modelo"><div class="tool-h"><b id="tool-t"></b><button class="btn sm" type="button" id="tool-x">Listo, cerrar</button></div><iframe id="tool-f" title="Herramienta 3D"></iframe></div>
 <div class="toast" id="toast" hidden role="status"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script type="module" src="js/dashboard.js"></script>
 </body>
 </html>

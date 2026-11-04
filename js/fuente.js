@@ -74,6 +74,10 @@ export async function resolverSala(fuente) {
   if (fuente.tipo === 'local') {
     original = ls('lc:renders:p:' + fuente.id);
     if (!original) throw new Error('Ese proyecto ya no está guardado en este navegador.');
+  } else if (fuente.tipo === 'json') {
+    const r = await fetch(new URL(fuente.url, fuente.base || location.href).href, { cache: 'no-cache' });
+    if (!r.ok) throw new Error('No se encontró la sala (' + r.status + ')');
+    original = await r.json();
   } else {
     original = await cargarDatosUrl(fuente.tipo === 'url' ? fuente.datos : DEMO_DATOS);
   }
@@ -125,7 +129,7 @@ export function desconectarSala(fuente, res) {
 
 /* ---------- apps 3D guardadas ---------- */
 /* app: {key, nombre, fuente, salaUrl, torre:{altoPiso, losa, fachada}, modelos:{plantaId:{tipo, url}}, creada, actualizada} */
-export function keyDe(fuente) { return fuente.tipo === 'local' ? 'l-' + fuente.id : fuente.tipo === 'demo' ? 'demo' : 'u-' + hash(fuente.datos); }
+export function keyDe(fuente) { return fuente.tipo === 'local' ? 'l-' + fuente.id : fuente.tipo === 'demo' ? 'demo' : 'u-' + hash(fuente.datos || fuente.url); }
 export function listaApps() { return (ls('lc:3d:apps') || []).map(k => ls('lc:3d:app:' + k)).filter(Boolean).sort((a, b) => b.actualizada - a.actualizada); }
 export function leerApp(key) { return ls('lc:3d:app:' + key); }
 export function guardarApp(app) {
@@ -136,11 +140,59 @@ export function guardarApp(app) {
 export async function borrarApp(key) {
   const app = leerApp(key);
   ls('lc:3d:app:' + key, null); ls('lc:3d:apps', (ls('lc:3d:apps') || []).filter(k => k !== key));
-  if (app) for (const id of Object.keys(app.modelos || {})) await idb.del(key + ':' + id).catch(() => {});
+  if (app) for (const id of Object.keys(app.modelos || {}).concat('edificio')) await idb.del(key + ':' + id).catch(() => {});
+}
+export const PREGUNTAS = {
+  perfil: { q: '¿Para qué buscas este apartamento?', op: ['Para vivir', 'Para invertir', 'Para mis papás o hijos'] },
+  espacios: {
+    sala: [{ q: '¿Cuántas personas se sentarían normalmente en la sala?', op: ['2', '3 a 4', '5 o más'] }],
+    cocina: [{ q: '¿Cocinan a diario en casa?', op: ['Sí, todos los días', 'A veces', 'Casi nunca'] }],
+    principal: [{ q: '¿Qué tamaño de cama tienes o piensas comprar?', op: ['Doble 1,40 m', 'Queen 1,60 m', 'King 2,00 m'] }],
+    habitacion: [{ q: '¿Quién usaría esta habitación?', op: ['Hijos', 'Visitas', 'Oficina en casa'] }],
+    bano: [{ q: '¿Prefieres ducha o tina?', op: ['Ducha', 'Tina', 'Me da igual'] }],
+    balcon: [{ q: '¿Para qué usarías el balcón?', op: ['Plantas', 'Mascota', 'Zona para descansar'] }],
+    vestier: [{ q: '¿Necesitas más espacio de clóset del que ves?', op: ['Sí', 'Así está bien'] }],
+    estudio: [{ q: '¿Trabajas desde casa?', op: ['Todos los días', 'Algunos días', 'No'] }],
+    otro: []
+  }
+};
+export const ESPACIOS = [['sala', 'Sala-comedor'], ['cocina', 'Cocina'], ['principal', 'Habitación principal'], ['habitacion', 'Otras habitaciones'], ['bano', 'Baños'], ['balcon', 'Balcón / terraza'], ['vestier', 'Vestier / clósets'], ['estudio', 'Estudio'], ['otro', 'Otros espacios']];
+/* nombre de un espacio → tipo de preguntas */
+export function claveEspacio(n) {
+  n = String(n || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  if (/principal|master/.test(n)) return 'principal';
+  if (/sala|comedor|estar|social|living/.test(n)) return 'sala';
+  if (/cocina|kitchen/.test(n)) return 'cocina';
+  if (/bano|wc|aseo|bath/.test(n)) return 'bano';
+  if (/balcon|terraza|patio/.test(n)) return 'balcon';
+  if (/vestier|closet|walk/.test(n)) return 'vestier';
+  if (/estudio|oficina|study/.test(n)) return 'estudio';
+  if (/habitacion|alcoba|dormitorio|cuarto|hab|bed/.test(n)) return 'habitacion';
+  return 'otro';
 }
 export function appPorDefecto(fuente, S) {
   const modelos = {}; (S.plantas || []).forEach(p => { modelos[p.id] = { tipo: 'referencia' }; });
-  return { v: 1, key: keyDe(fuente), nombre: S.proyecto || 'Mi proyecto', fuente, salaUrl: fuente.tipo === 'demo' ? DEMO_SALA : '', torre: { altoPiso: 3, losa: '#ece6dc', fachada: '#2b2a27' }, modelos };
+  return completarApp({ v: 2, key: keyDe(fuente), nombre: S.proyecto || 'Mi proyecto', fuente, salaUrl: fuente.tipo === 'demo' ? DEMO_SALA : '', modelos });
+}
+/* llena lo que falte (apps creadas antes de esta versión) */
+export function completarApp(app) {
+  app.torre = Object.assign({ altoPiso: 3, losa: '#ece6dc', fachada: '#2b2a27' }, app.torre);
+  app.modelos = app.modelos || {};
+  app.edificio = Object.assign({ tipo: 'ninguno', volumenes: 'siempre' }, app.edificio);
+  app.preguntas = app.preguntas || JSON.parse(JSON.stringify(PREGUNTAS));
+  app.preguntas.espacios = Object.assign({}, PREGUNTAS.espacios, app.preguntas.espacios);
+  app.agenda = Object.assign({ dias: [1, 2, 3, 4, 5, 6], desde: '09:00', hasta: '18:00', cada: 60, asesor: '', whatsapp: '', direccion: '', modalidad: true }, app.agenda);
+  app.crm = Object.assign({ lifecity: true, hubspot: { portalId: '', formId: '' }, webhook: { url: '' }, whatsapp: true }, app.crm);
+  return app;
+}
+
+/* app publicada como archivo (carpeta con app.json + sala.json + modelos/) */
+export async function cargarAppJson(url) {
+  const abs = new URL(url, location.href).href;
+  const r = await fetch(abs, { cache: 'no-cache' }); if (!r.ok) throw new Error('No se encontró ' + url);
+  const app = await r.json();
+  if (app.fuente && app.fuente.tipo === 'json') app.fuente.base = abs;
+  return { app, base: abs };
 }
 
 /* la app viaja en el link (?c=…) para que el comprador la abra en cualquier equipo;
@@ -152,7 +204,8 @@ export function configPublica(app) {
     if (!c.salaUrl) return null;
     c.fuente = { tipo: 'url', datos: datosDeSala(c.salaUrl) };
   }
-  Object.values(c.modelos || {}).forEach(m => { if (m.tipo === 'archivo') { m.tipo = 'referencia'; } });
+  Object.values(c.modelos || {}).forEach(m => { if (m.tipo === 'archivo') { m.tipo = 'referencia'; delete m.vistas; } });
+  if (c.edificio && c.edificio.tipo === 'archivo') c.edificio = { tipo: 'ninguno' };
   return c;
 }
 export function baseApp() { return location.href.split('#')[0].split('?')[0].replace(/[^/]*$/, ''); }
