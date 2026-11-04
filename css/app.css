@@ -1,0 +1,33 @@
+:root{
+  --bg:#0f100e; --surface:#191a17; --raise:#22231f; --line:#34352f; --fg:#f2eee6; --muted:#a9a497;
+  --gold:#c9a45c; --gold-ink:#1b1608; --ok:#3fb173; --warn:#e0a83a; --off:#8d8780; --danger:#e26d5a;
+  --display:"Cormorant Garamond",Georgia,serif; --body:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --r:14px; color-scheme:dark;
+}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){
+  --bg:#f4f1ea; --surface:#ffffff; --raise:#f0ece3; --line:#ddd6c8; --fg:#1d1c19; --muted:#6b665b;
+  --gold:#9c7a33; --gold-ink:#fff; --ok:#23804f; --warn:#a46d0c; --off:#7d776f; --danger:#b4432f; color-scheme:light}}
+:root[data-theme="light"]{
+  --bg:#f4f1ea; --surface:#ffffff; --raise:#f0ece3; --line:#ddd6c8; --fg:#1d1c19; --muted:#6b665b;
+  --gold:#9c7a33; --gold-ink:#fff; --ok:#23804f; --warn:#a46d0c; --off:#7d776f; --danger:#b4432f; color-scheme:light}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font:14.5px/1.5 var(--body)}
+h1,h2,h3{font-family:var(--display);font-weight:600;margin:0;line-height:1.1;text-wrap:balance}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:11px;background:var(--gold);color:var(--gold-ink);font-weight:600;padding:11px 16px;cursor:pointer;text-decoration:none;white-space:nowrap}
+.btn:hover{filter:brightness(1.08)}
+.btn.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+.btn.ghost:hover{border-color:var(--gold)}
+.btn.sm{padding:7px 11px;font-size:13px;border-radius:9px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;border-radius:99px;padding:3px 9px;background:var(--raise)}
+.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.pill.disponible{color:var(--ok)} .pill.reservado{color:var(--warn)} .pill.vendido{color:var(--off)}
+.eyebrow{font-size:11.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--gold)}
+.muted{color:var(--muted)}
+.field{display:flex;flex-direction:column;gap:5px;font-size:13px;font-weight:500}
+.field input,.field select{background:var(--raise);border:1px solid var(--line);border-radius:10px;padding:9px 11px;min-width:0;width:100%}
+.field small{color:var(--muted);font-weight:400}

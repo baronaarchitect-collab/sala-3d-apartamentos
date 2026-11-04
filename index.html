@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Apps 3D de Sala de Ventas</title>
+<meta name="description" content="Dashboard para crear la app 3D de una sala de ventas: edificio con inventario en vivo y recorrido dentro de cada apartamento disponible.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/dashboard.css">
+</head>
+<body>
+<header class="bar">
+  <div class="wrap row">
+    <a class="brand" href="./"><span class="logo">LC</span><span>Life City · <b>Apps 3D</b></span></a>
+    <nav class="nav"><a href="#fuente">Crear app</a><a href="#mis-apps">Mis apps</a><a href="visor.html" target="_blank" rel="noopener">Ver demo ↗</a></nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="hero">
+    <div class="eyebrow">Sala de ventas · recorrido 3D</div>
+    <h1>Crea la app 3D de tu proyecto y deja que el comprador entre a su apartamento</h1>
+    <p class="lede">Tomamos el proyecto de tu sala de ventas con renders, levantamos el edificio en 3D con el inventario en vivo y cada unidad disponible se abre con un clic para recorrerla, medirla y probar acabados.</p>
+    <ol class="steps">
+      <li><b>1</b><span>Elige la sala</span><small>Demo, tus proyectos o una sala publicada</small></li>
+      <li><b>2</b><span>Arma el edificio</span><small>Pisos y aptos salen de las plantas de la sala</small></li>
+      <li><b>3</b><span>Asigna los apartamentos</span><small>Modelo tipo, GLB propio o generado de la planta</small></li>
+      <li><b>4</b><span>Conecta y comparte</span><small>El botón "Ver recorrido en 3D" aparece en la sala</small></li>
+    </ol>
+  </section>
+
+  <section id="mis-apps" class="block" hidden>
+    <div class="sec-h"><h2>Mis apps 3D</h2><p class="muted">Guardadas en este navegador.</p></div>
+    <div class="grid" id="apps"></div>
+  </section>
+
+  <section id="fuente" class="block">
+    <div class="sec-h"><h2>1 · Elige el proyecto de la sala de ventas</h2>
+      <p class="muted">La app usa los mismos pisos, plantas, precios y estados que la sala. Lo que la constructora marque en el dashboard de la sala se ve en el 3D al instante.</p></div>
+    <div class="grid" id="fuentes"><p class="muted">Cargando proyectos…</p></div>
+    <p class="muted small">¿Aún no tienes la sala? <a href="https://baronaarchitect-collab.github.io/Inicio-bim/visor/renders/#implementar" target="_blank" rel="noopener">Créala con tus renders y plantas en el asistente ↗</a>. Los proyectos que guardes ahí aparecen en esta lista cuando abres este dashboard desde baronaarchitect-collab.github.io.</p>
+  </section>
+
+  <section id="config" class="block" hidden>
+    <div class="sec-h"><h2>2 · Configura la app 3D</h2><p class="muted" id="cfg-sub"></p></div>
+    <div class="cols">
+      <form id="form" class="panel" autocomplete="off">
+        <fieldset>
+          <legend>Proyecto</legend>
+          <label class="field">Nombre que ve el comprador<input id="f-nombre" required></label>
+          <label class="field">Link de la sala de ventas publicada<input id="f-sala" type="url" placeholder="https://tu-sala.netlify.app/"><small>Se usa en "Separar en la sala de ventas" y para que el link de la app funcione en cualquier equipo.</small></label>
+        </fieldset>
+        <fieldset>
+          <legend>Edificio</legend>
+          <div class="two">
+            <label class="field">Altura entre pisos (m)<input id="f-alto" type="number" min="2.4" max="6" step="0.05"></label>
+            <label class="field">Color de losas<input id="f-losa" type="color"></label>
+            <label class="field">Color del núcleo<input id="f-fachada" type="color"></label>
+          </div>
+          <div class="inv" id="inv"></div>
+        </fieldset>
+        <fieldset>
+          <legend>Apartamentos por tipología</legend>
+          <p class="muted small">Cada planta de la sala es una tipología. Elige qué ve el comprador cuando entra a un apto de esa planta.</p>
+          <div id="tipos"></div>
+        </fieldset>
+        <div class="actions"><button class="btn" type="submit">Guardar y ver</button><span class="saved muted small" id="saved" role="status"></span></div>
+      </form>
+      <div class="preview">
+        <div class="pv-h"><b>Vista previa</b><a class="btn ghost sm" id="a-abrir" href="#" target="_blank" rel="noopener">Abrir la app ↗</a></div>
+        <iframe id="pv" title="Vista previa de la app 3D" loading="lazy"></iframe>
+        <p class="muted small">Gira el edificio, toca una unidad disponible y entra al apartamento.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="publicar" class="block" hidden>
+    <div class="sec-h"><h2>3 · Conecta y comparte</h2><p class="muted">El comprador abre la app desde la sala de ventas o desde el link.</p></div>
+    <div class="cards3">
+      <div class="panel">
+        <h3>Conectar con la sala de ventas</h3>
+        <p class="muted small">Guarda el link de esta app como "Link del recorrido 3D" del proyecto. La fachada de la sala muestra <b>Ver recorrido en 3D</b> y la ficha de cada apto también.</p>
+        <div class="actions"><button class="btn" id="b-conectar" type="button">Conectar con la sala</button><button class="btn ghost sm" id="b-desconectar" type="button">Quitar</button></div>
+        <p class="msg small" id="m-conectar" role="status"></p>
+      </div>
+      <div class="panel">
+        <h3>Link para compradores</h3>
+        <p class="muted small" id="pub-nota"></p>
+        <div class="copy"><input id="l-pub" readonly aria-label="Link público"><button class="btn sm" type="button" data-copy="l-pub">Copiar</button></div>
+        <p class="muted small">Agrega <code>&amp;apto=1203</code> para abrir con una unidad elegida.</p>
+      </div>
+      <div class="panel">
+        <h3>Insertar en tu web</h3>
+        <p class="muted small">Pega este código en la página del proyecto.</p>
+        <div class="copy"><input id="l-embed" readonly aria-label="Código para insertar"><button class="btn sm" type="button" data-copy="l-embed">Copiar</button></div>
+      </div>
+    </div>
+  </section>
+</main>
+<footer class="wrap foot muted small">Life City BIM Management Hub · Cali, Colombia · conectado con la <a href="https://baronaarchitect-collab.github.io/Inicio-bim/visor/renders/" target="_blank" rel="noopener">sala de ventas con renders</a></footer>
+<div class="toast" id="toast" hidden role="status"></div>
+<script type="module" src="js/dashboard.js"></script>
+</body>
+</html>

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Recorrido 3D · Sala de ventas</title>
+<meta name="description" content="Gira el edificio, elige un apartamento disponible y entra a recorrerlo en 3D.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/visor.css">
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
+</head>
+<body>
+<canvas id="cv" aria-label="Edificio en 3D"></canvas>
+<div id="labels" aria-hidden="true"></div>
+
+<header class="top">
+  <div class="brand"><span class="logo">LC</span><div><b id="t-proy">Cargando…</b><small id="t-sub">Sala de ventas · recorrido 3D</small></div></div>
+  <div class="legend" id="legend"><span class="pill disponible">Disponible</span><span class="pill reservado">Reservado</span><span class="pill vendido">Vendido</span></div>
+  <a class="btn ghost sm" id="a-sala" href="#" target="_blank" rel="noopener" hidden>Ir a la sala de ventas ↗</a>
+</header>
+
+<!-- exterior -->
+<aside class="panel" id="ext">
+  <div class="ph">
+    <div><div class="eyebrow">Unidades del edificio</div><div class="counts" id="counts"></div></div>
+    <button class="btn ghost sm only-m" id="b-col" type="button">Ver unidades</button>
+  </div>
+  <div class="chips" role="group" aria-label="Filtro">
+    <button type="button" data-f="disponible" aria-pressed="true">Disponibles</button>
+    <button type="button" data-f="todas" aria-pressed="false">Todas</button>
+  </div>
+  <div class="ulist" id="ulist"></div>
+</aside>
+<div class="card" id="card" hidden></div>
+<div class="tip" id="tip" hidden></div>
+
+<!-- interior -->
+<div class="ibar" id="ibar" hidden>
+  <button class="btn ghost sm" id="b-salir" type="button">← Edificio</button>
+  <div class="ititle"><b id="i-title"></b><small id="i-sub"></small></div>
+  <div class="tools" role="toolbar" aria-label="Herramientas">
+    <button type="button" data-t="walk" aria-pressed="true">Caminar</button>
+    <button type="button" data-t="medir" aria-pressed="false">Medir</button>
+    <button type="button" data-t="pintar" aria-pressed="false">Pintar</button>
+    <button type="button" data-t="maqueta" aria-pressed="false">Maqueta</button>
+  </div>
+</div>
+<nav class="rooms" id="rooms" hidden aria-label="Espacios"></nav>
+<aside class="panel ipanel" id="ipanel" hidden>
+  <div class="tabs" role="tablist">
+    <button type="button" role="tab" data-tab="ficha" aria-selected="true">Mi ficha</button>
+    <button type="button" role="tab" data-tab="acabados" aria-selected="false">Acabados</button>
+    <button type="button" role="tab" data-tab="proyecto" aria-selected="false">Proyecto</button>
+  </div>
+  <section data-pane="ficha">
+    <p class="muted small" id="f-intro">Mide paredes y espacios con <b>Medir</b>. Te decimos si tu mueble cabe y lo dejamos en tu ficha para el asesor.</p>
+    <ol class="mlist" id="mlist"></ol>
+    <div class="fstats"><span><b id="s-r">0</b> espacios</span><span><b id="s-m">0</b> medidas</span></div>
+    <button class="btn" id="b-cita" type="button">Agendar cita con mi ficha</button>
+    <button class="btn ghost" id="b-borrar" type="button">Borrar medidas del modelo</button>
+  </section>
+  <section data-pane="acabados" hidden>
+    <p class="muted small">Elige un color y toca una superficie del apartamento para verla con ese acabado.</p>
+    <div class="swatches" id="swatches"></div>
+    <button class="btn ghost sm" id="b-orig" type="button">Volver a los acabados originales</button>
+  </section>
+  <section data-pane="proyecto" hidden>
+    <div id="decisiones"></div>
+  </section>
+</aside>
+
+<div class="hint" id="hint">Gira el edificio y toca una unidad disponible</div>
+<div class="fade" id="fade"></div>
+<div class="loading" id="loading"><div class="spin"></div><p id="ltxt">Cargando el edificio…</p></div>
+<div class="toast" id="toast" hidden role="status"></div>
+
+<script type="module" src="js/visor.js"></script>
+</body>
+</html>
