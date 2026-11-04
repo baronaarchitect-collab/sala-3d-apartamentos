@@ -71,3 +71,4 @@ code{background:var(--raise);padding:1px 5px;border-radius:5px;font-size:12px}
 .tool iframe{flex:1;width:100%;border:0;border-radius:14px;background:#141512}
 #m-prueba.ok{color:var(--ok)}#m-prueba.no{color:var(--danger)}
 @media (max-width:900px){.two2{grid-template-columns:minmax(0,1fr)}}
+.ok-t{color:var(--ok)}

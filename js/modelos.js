@@ -39,7 +39,7 @@ async function cargarIFC(src) {
   const group = new THREE.Group(); group.name = 'IFC';
   const mats = {}, cajas = {};
   const m4 = new THREE.Matrix4();
-  A.StreamAllMeshes(id, mesh => {
+  const leer = mesh => {
     const pgs = mesh.geometries, esEspacio = espaciosId.has(mesh.expressID);
     for (let i = 0; i < pgs.size(); i++) {
       const pg = pgs.get(i), g = A.GetGeometry(id, pg.geometryExpressID);
@@ -65,17 +65,49 @@ async function cargarIFC(src) {
       const me = new THREE.Mesh(geo, mat); me.userData.expressID = mesh.expressID;
       group.add(me);
     }
-  });
+  };
+  A.StreamAllMeshes(id, leer);
+  // web-ifc deja los IfcSpace por fuera de StreamAllMeshes: se piden aparte (solo para sus cajas)
+  if (espaciosId.size) { try { A.StreamAllMeshesWithTypes(id, [W.IFCSPACE], leer); } catch (e) { console.warn('IfcSpace:', e); } }
   const txt = x => (x && x.value != null ? String(x.value) : '');
-  const espacios = Object.entries(cajas).map(([sid, box]) => {
-    let nombre = '';
-    try { const L = A.GetLine(id, +sid); nombre = txt(L.LongName) || txt(L.Name); } catch (e) {}
-    return { nombre: nombre || 'Espacio ' + sid, box };
+  const linea = n => { try { return A.GetLine(id, n); } catch (e) { return null; } };
+  const ref = v => (v && typeof v === 'object' ? (v.value != null ? v.value : v.expressID) : v);
+  const lista = v => (Array.isArray(v) ? v : v ? [v] : []);
+  const todos = T => { try { return ids(A.GetLineIDsWithType(id, T)); } catch (e) { return []; } };
+  // pisos y en qué piso está cada espacio (IfcRelAggregates / IfcRelContainedInSpatialStructure)
+  const pisos = [], pisoNombre = {}, espacioPiso = {};
+  todos(W.IFCBUILDINGSTOREY).forEach(sid => { const L = linea(sid); if (!L) return; pisoNombre[sid] = txt(L.LongName) || txt(L.Name); pisos.push({ id: sid, nombre: pisoNombre[sid], elev: +txt(L.Elevation) || 0 }); });
+  [W.IFCRELAGGREGATES, W.IFCRELCONTAINEDINSPATIALSTRUCTURE].forEach(T => todos(T).forEach(r => {
+    const L = linea(r); if (!L) return;
+    const padre = ref(L.RelatingObject || L.RelatingStructure); if (!(padre in pisoNombre)) return;
+    lista(L.RelatedObjects || L.RelatedElements).forEach(o => { const k = ref(o); if (espaciosId.has(k)) espacioPiso[k] = padre; });
+  }));
+  // zonas que agrupan espacios (IfcZone vía IfcRelAssignsToGroup)
+  const zona = {};
+  todos(W.IFCRELASSIGNSTOGROUP).forEach(r => {
+    const L = linea(r); if (!L) return;
+    const gid = ref(L.RelatingGroup); let tipo; try { tipo = A.GetLineType(id, gid); } catch (e) {}
+    if (tipo !== W.IFCZONE) return;
+    const G = linea(gid), nom = G ? (txt(G.Name) || txt(G.LongName)) : '';
+    lista(L.RelatedObjects).forEach(o => { const k = ref(o); if (espaciosId.has(k) && nom) zona[k] = nom; });
   });
-  const pisos = [];
-  try {
-    ids(A.GetLineIDsWithType(id, W.IFCBUILDINGSTOREY)).forEach(sid => { const L = A.GetLine(id, sid); pisos.push({ nombre: txt(L.LongName) || txt(L.Name), elev: +txt(L.Elevation) || 0 }); });
-  } catch (e) {}
+  // parámetros del espacio que dicen a qué apartamento pertenece (Revit: Departamento del room)
+  const prop = {}, RE_P = /apart|unidad|^unit|apto|depto|dpto|department|departamento|vivienda|inmueble|dwelling/i;
+  todos(W.IFCRELDEFINESBYPROPERTIES).forEach(r => {
+    const L = linea(r); if (!L) return;
+    const objs = lista(L.RelatedObjects).map(ref).filter(k => espaciosId.has(k)); if (!objs.length) return;
+    const ps = linea(ref(L.RelatingPropertyDefinition)); if (!ps || !ps.HasProperties) return;
+    lista(ps.HasProperties).forEach(pr => {
+      const P = linea(ref(pr)); if (!P || !P.Name || !RE_P.test(txt(P.Name))) return;
+      const v = P.NominalValue && P.NominalValue.value != null ? String(P.NominalValue.value).trim() : '';
+      if (v) objs.forEach(k => { if (!prop[k]) prop[k] = v; });
+    });
+  });
+  const espacios = Object.entries(cajas).map(([sid, box]) => {
+    const L = linea(+sid) || {}, k = +sid;
+    const largo = txt(L.LongName), corto = txt(L.Name);
+    return { id: k, nombre: largo || corto || 'Espacio ' + sid, numero: largo ? corto : '', piso: pisoNombre[espacioPiso[k]] || '', pisoId: espacioPiso[k], zona: zona[k] || '', prop: prop[k] || '', box };
+  });
   A.CloseModel(id);
   return { scene: group, formato: 'ifc', espacios, pisos };
 }

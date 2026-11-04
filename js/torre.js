@@ -116,6 +116,8 @@ export function construirTorre(S, opts = {}) {
       let op = u.estado === 'vendido' ? 0.55 : 0.92;
       if (sobreModelo) op = (on || hv) ? 0.75 : vol === 'hover' ? 0 : (u.estado === 'disponible' ? 0.42 : 0.22);
       mat.opacity = op; mat.depthWrite = !sobreModelo;
+      // sobre el modelo, la unidad elegida o tocada se ve a través de muros y fachada
+      const xray = sobreModelo && (on || hv); if (mat.depthTest === xray) { mat.depthTest = !xray; m.renderOrder = xray ? 5 : 0; }
       mat.emissive.setHex(on || hv ? 0xffffff : 0x000000);
       mat.emissiveIntensity = on ? 0.32 : hv ? 0.16 : 0;
       m.children[0].material.opacity = sobreModelo ? (on ? 1 : (vol === 'hover' && !hv ? 0 : 0.25)) : (on ? 1 : 0.35);

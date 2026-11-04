@@ -72,7 +72,7 @@ async function elegir(f, salaUrl) {
   fuente = f;
   app = completarApp(leerApp(keyDe(f)) || appPorDefecto(f, res.S));
   if (salaUrl && !app.salaUrl) app.salaUrl = salaUrl;
-  (res.S.plantas || []).forEach(p => { app.modelos[p.id] = app.modelos[p.id] || { tipo: 'referencia' }; });
+  (res.S.plantas || []).forEach(p => { app.modelos[p.id] = app.modelos[p.id] || { tipo: 'auto' }; });
   guardarApp(app);
   document.querySelectorAll('#fuentes .src').forEach(c => c.setAttribute('aria-current', c.dataset.key === app.key));
   pintarForm(); pintarCRM();
@@ -83,6 +83,7 @@ async function elegir(f, salaUrl) {
 }
 
 const OPC = [
+  ['auto', 'Automático: el apto del IFC del edificio o el modelo que puso la sala'],
   ['referencia', 'Apartamento tipo de referencia (modelo real de Unreal)'],
   ['planta', 'Generado desde la planta de la sala'],
   ['archivo', 'Mi modelo: subir archivo (IFC, GLB, OBJ, FBX)'],
@@ -113,12 +114,15 @@ function pintarForm() {
   $('#f-ed-url').value = E.tipo === 'url' ? E.url || '' : '';
   $('#f-ed-nota').textContent = E.tipo === 'archivo' && E.nombre ? `Cargado: ${E.nombre}${E.peso ? ' (' + MB(E.peso) + ')' : ''}. Solo en este navegador hasta que lo publiques.` : 'Un IFC grande puede tardar en abrir en celulares; si puedes, publica una versión GLB.';
   visEd();
-  $('#ed-estado').textContent = E.ajuste ? `Encajado · escala ${E.ajuste.esc} · giro ${(E.ajuste.rot || 0)}°` : (E.tipo !== 'ninguno' ? 'Se encaja solo por altura; ajústalo para que cada volumen quede sobre su apto.' : '');
+  const D = E.aptos;
+  $('#ed-estado').innerHTML = E.tipo === 'ninguno' ? '' : D && D.conectados
+    ? `<b class="ok-t">✓ ${D.conectados} de ${D.total} apartamentos</b> del IFC conectados con la sala (por ${esc(D.como || '')}). Se recorren desde el modelo del edificio.`
+    : (E.ajuste ? `Encajado · escala ${E.ajuste.esc} · giro ${(E.ajuste.rot || 0)}°. ` : '') + 'Si el IFC trae espacios (rooms), al abrir "Encajar" se detectan los apartamentos.';
 
   // tipologías
   const T = $('#tipos'); T.innerHTML = '';
   (S.plantas || []).forEach(p => {
-    const m = app.modelos[p.id] = app.modelos[p.id] || { tipo: 'referencia' };
+    const m = app.modelos[p.id] = app.modelos[p.id] || { tipo: 'auto' };
     const n = (S.pisos || []).filter(x => x.planta === p.id).length;
     const nv = m.vistas ? Object.keys(m.vistas).length : 0;
     const propio = m.tipo === 'url' || m.tipo === 'archivo';
@@ -129,7 +133,7 @@ function pintarForm() {
       <label class="field" data-w="archivo"><span>Archivo del apartamento</span><input type="file" accept="${FORMATOS}"><small>${m.tipo === 'archivo' && m.nombre ? 'Cargado: ' + esc(m.nombre) + '. ' : ''}Exporta solo el apartamento (Revit: vista 3D con caja de sección → IFC; Unreal/3ds Max/SketchUp → GLB).</small></label>
       <div class="actions" data-w="propio"><button class="btn ghost sm" type="button" data-rec>Configurar recorrido (preguntas)</button>
         <span class="estado-rec ${nv ? 'ok' : 'falta'}">${nv ? '✓ ' + nv + ' espacios ubicados' : 'Falta: dinos dónde está cada espacio'}</span></div>
-      <div class="actions" data-w="incluido"><button class="btn ghost sm" type="button" data-ver>Ver este apartamento</button><span class="muted small">El recorrido ya viene incluido.</span></div>`;
+      <div class="actions" data-w="incluido"><button class="btn ghost sm" type="button" data-ver>Ver este apartamento</button><span class="muted small">${m.tipo === 'auto' ? autoTexto(p) : 'El recorrido ya viene incluido.'}</span></div>`;
     const sel = d.querySelector('select'), url = d.querySelector('[data-w=url] input'), file = d.querySelector('[data-w=archivo] input');
     const vis = () => {
       const t = sel.value;
@@ -150,7 +154,12 @@ function pintarForm() {
       if (sel.value === 'url' && !/^https?:\/\//.test(url.value.trim())) { toast('Pega primero el link del modelo'); return; }
       abrirHerramienta('recorrido', p.id, 'Recorrido de ' + (p.nombre || p.id));
     };
-    d.querySelector('[data-ver]').onclick = () => abrirHerramienta('recorrido', p.id, (p.nombre || p.id));
+    d.querySelector('[data-ver]').onclick = () => {
+      if (sel.value !== 'auto') return abrirHerramienta('recorrido', p.id, (p.nombre || p.id));
+      // automático: se entra a un apto real de esa planta, con el modelo del edificio cargado
+      const u = (S.unidades || []).find(x => (S.pisos || []).some(q => q.id === x.piso && q.planta === p.id));
+      abrirHerramienta('entrar', u ? u.id : '', (p.nombre || p.id));
+    };
     vis(); T.appendChild(d);
   });
 
@@ -223,8 +232,17 @@ $('#f-ed-file').onchange = async () => {
 $('#b-encajar').onclick = () => abrirHerramienta('ajustar', null, 'Encajar el modelo del edificio');
 
 /* herramientas 3D a pantalla completa (encajar edificio · preguntas del recorrido) */
+function autoTexto(p) {
+  const D = app.edificio.aptos, S = res.S;
+  const us = (S.unidades || []).filter(u => (S.pisos || []).some(q => q.id === u.piso && q.planta === p.id));
+  const conIFC = D ? us.filter(u => D.unidades && D.unidades[u.id]).length : 0;
+  const sala = (p.aptos || []).filter(a => a.recorrido).length || (p.recorrido ? (p.aptos || []).length : 0);
+  if (conIFC) return `${conIFC} de ${us.length} aptos se recorren desde el IFC del edificio.`;
+  if (sala) return 'Usa el recorrido que la sala le puso a estos aptos.';
+  return 'Sin IFC con espacios ni modelo en la sala: abre el apto de referencia.';
+}
 function abrirHerramienta(tipo, planta, titulo) {
-  const L = linkLocal(app) + (tipo === 'ajustar' ? '&ajustar=1' : '&recorrido=' + encodeURIComponent(planta)) + '&t=' + Date.now();
+  const L = linkLocal(app) + (tipo === 'ajustar' ? '&ajustar=1' : tipo === 'entrar' ? '&apto=' + encodeURIComponent(planta) + '&entrar=1' : '&recorrido=' + encodeURIComponent(planta)) + '&t=' + Date.now();
   $('#tool-t').textContent = titulo; $('#tool-f').src = L; $('#tool').hidden = false;
 }
 function cerrarHerramienta() {

@@ -11,6 +11,9 @@
  *   …&apto=1203 [&entrar=1]        → abre con esa unidad elegida (y entra)
  *   …&ajustar=1                    → (dashboard) encajar el modelo del edificio con los volúmenes de la sala
  *   …&recorrido=<plantaId>         → (dashboard) preguntas para configurar el recorrido de una tipología
+ *   visor.html?sala=<link de la sala>&apto=302&entrar=1[&modelo=<url>]
+ *                                  → desde la sala de renders: entra al apto con su modelo (o el automático)
+ * Con un IFC del edificio que trae espacios (rooms), los apartamentos se detectan solos y se conectan con las unidades de la sala.
  */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -18,7 +21,9 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { construirTorre } from './torre.js';
 import { cargarInterior } from './interior.js';
 import { cargarModelo, limpiar } from './modelos.js';
-import { resolverSala, escucharEstados, leerApp, guardarApp, unb64, idb, esc, DEMO_SALA, completarApp, cargarAppJson, claveEspacio } from './fuente.js';
+import { detectarAptos, reasignar } from './aptos.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { resolverSala, escucharEstados, leerApp, guardarApp, unb64, idb, esc, DEMO_SALA, completarApp, cargarAppJson, claveEspacio, datosDeSala, leerSalaDB, appDeSala, listaApps } from './fuente.js';
 import { enviarCita, resumenTexto, linkWhatsApp } from './crm.js';
 
 const $ = s => document.querySelector(s);
@@ -32,6 +37,7 @@ const avisar = () => { try { parent !== window && parent.postMessage({ tipo: 'lc
 /* ---------- escena ---------- */
 const cv = $('#cv');
 const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, preserveDrawingBuffer: true });
+renderer.localClippingEnabled = true; // recorte del apartamento dentro del modelo del edificio
 renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -85,6 +91,16 @@ try {
   if (qs.get('cfg')) ({ app, base } = await cargarAppJson(qs.get('cfg')));
   else if (qs.get('c')) app = unb64(qs.get('c'));
   else if (qs.get('app')) { app = leerApp(qs.get('app')); editable = !!app; }
+  else if (qs.get('sala')) {
+    // abierto desde la sala de renders: si este navegador ya tiene la app 3D de esa sala se usa; si no, la sala sola
+    const salaUrl = new URL(qs.get('sala'), location.href).href;
+    app = appDeSala(salaUrl) || { fuente: { tipo: 'url', datos: datosDeSala(salaUrl) }, salaUrl, modelos: {} };
+  }
+  else if (qs.get('local')) {
+    // vista previa del asistente de la sala: el proyecto vive en este navegador (mismo origen en GitHub Pages)
+    const id = qs.get('local');
+    app = listaApps().find(x => x.fuente && x.fuente.tipo === 'local' && x.fuente.id === id) || { fuente: { tipo: 'local', id }, salaUrl: '', modelos: {} };
+  }
 } catch (e) { console.warn(e); }
 if (!app) app = { fuente: { tipo: 'demo' }, salaUrl: DEMO_SALA, modelos: {} };
 completarApp(app);
@@ -101,7 +117,9 @@ async function main() {
   document.title = (app.nombre || S.proyecto || 'Sala de ventas') + ' · Recorrido 3D';
   $('#t-proy').textContent = app.nombre || S.proyecto || 'Sala de ventas';
   $('#t-sub').textContent = [S.empresa, S.ciudad].filter(Boolean).join(' · ') || 'Recorrido 3D';
-  if (app.salaUrl) { $('#a-sala').href = app.salaUrl; $('#a-sala').hidden = false; $('#a-renders').href = app.salaUrl; $('#a-renders').hidden = false; }
+  // abierto desde la sala (encima de ella): "Renders y plantas" la cierra con el botón de la sala, no se navega adentro
+  const dentroDeSala = (qs.has('sala') || qs.has('local')) && qs.has('embed');
+  if (app.salaUrl && !dentroDeSala) { $('#a-sala').href = app.salaUrl; $('#a-sala').hidden = false; $('#a-renders').href = app.salaUrl; $('#a-renders').hidden = false; }
 
   if (qs.get('recorrido') && editable) { await asistenteRecorrido(qs.get('recorrido')); return; }
 
@@ -137,11 +155,41 @@ async function cargarEdificio() {
   const raw = new THREE.Box3().setFromObject(r.scene);
   const off = new THREE.Group(), cont = new THREE.Group(); off.add(r.scene); cont.add(off); cont.name = 'modeloEdificio';
   T.group.add(cont);
-  modeloEd = { cont, off, raw, r };
+  modeloEd = { cont, off, raw, r, vols: [] };
   if (!E.ajuste) E.ajuste = autoAjuste();
+  // apartamentos a partir de los espacios (rooms) del IFC, conectados con las unidades de la sala
+  if ((r.espacios || []).length && !(E.aptos && E.aptos.manual)) {
+    E.aptos = detectarAptos(r.espacios, S);
+    console.info('Apartamentos del IFC:', E.aptos.conectados, 'de', E.aptos.total, 'por', E.aptos.como);
+  }
   aplicarAjuste();
+  volumenesIFC();
   T.modoModelo(true, E.volumenes); T.refrescar(sel, hover);
 }
+/* cada unidad de la sala toma la forma de sus espacios en el IFC (y se mueve con el modelo) */
+const aptosIFC = () => (modeloEd && app.edificio.aptos && Object.keys(app.edificio.aptos.unidades || {}).length) ? app.edificio.aptos : null;
+function volumenesIFC() {
+  if (!modeloEd) return;
+  modeloEd.vols.forEach(m => m.parent && m.parent.remove(m)); modeloEd.vols = [];
+  const D = aptosIFC(); if (!D) return;
+  T.unidades.forEach(m => {
+    const a = D.unidades[m.userData.unidad.id];
+    if (!a || !(a.cajas || []).length) { m.visible = false; return; }
+    const geos = a.cajas.map(c => {
+      // un poco más grande que el espacio para que asome por fuera de muros y fachada
+      const w = c[3] - c[0], h = c[4] - c[1], d = c[5] - c[2], k = 0.7;
+      const g = new THREE.BoxGeometry(w + k, Math.max(0.05, h - 0.1), d + k);
+      g.translate((c[0] + c[3]) / 2, (c[1] + c[4]) / 2, (c[2] + c[5]) / 2); return g;
+    });
+    const geo = mergeGeometries(geos); geos.forEach(g => g.dispose());
+    m.geometry.dispose(); m.geometry = geo;
+    m.children[0].geometry.dispose(); m.children[0].geometry = new THREE.EdgesGeometry(geo, 30);
+    m.position.set(0, 0, 0); m.rotation.set(0, 0, 0); m.scale.set(1, 1, 1); m.visible = true;
+    m.userData.ifc = a;
+    modeloEd.off.add(m); modeloEd.vols.push(m);
+  });
+}
+const tocables = () => T.unidades.filter(m => m.visible);
 function autoAjuste() {
   const s = modeloEd.raw.getSize(new THREE.Vector3());
   const escala = s.y > 0 ? T.alto / s.y : 1;
@@ -158,7 +206,7 @@ function aplicarAjuste() {
 function reconstruirTorre() {
   scene.remove(T.group);
   T = construirTorre(S, app.torre); scene.add(T.group);
-  if (modeloEd) { T.group.add(modeloEd.cont); T.modoModelo(true, app.edificio.volumenes); }
+  if (modeloEd) { T.group.add(modeloEd.cont); volumenesIFC(); T.modoModelo(true, app.edificio.volumenes); }
   sel = null; hover = null; T.refrescar(); dibujarLista(); $('#card').hidden = true;
 }
 function panelAjuste() {
@@ -192,7 +240,34 @@ function panelAjuste() {
   $('#aj-planta').onclick = () => { auto = false; controls.autoRotate = false; controls.maxPolarAngle = Math.PI; volar(T.centro.clone().setY(T.radio * 3.2), T.centro.clone().setY(0)); };
   $('#aj-frente').onclick = () => { auto = false; controls.autoRotate = false; volar(new THREE.Vector3(0, T.alto * 0.5, T.radio * 3), T.centro.clone()); };
   $('#aj-guardar').onclick = () => { guardarApp(app); avisar(); toast('Ajuste guardado. El comprador verá el modelo así.'); };
-  pintar(); hint('Mueve, gira y escala el modelo hasta que coincida con los volúmenes de la sala');
+  $('#aj-detectar').onclick = () => {
+    if (!modeloEd) return;
+    app.edificio.aptos = detectarAptos(modeloEd.r.espacios || [], S); volumenesIFC(); T.refrescar(sel, hover); pintarAptos();
+    toast(app.edificio.aptos.conectados ? 'Apartamentos detectados de nuevo' : 'El modelo no trae espacios (rooms) para detectar apartamentos');
+  };
+  pintar(); pintarAptos(); hint('Mueve, gira y escala el modelo hasta que coincida con los volúmenes de la sala');
+}
+
+/* lista de apartamentos del IFC ↔ unidades de la sala, para corregir a mano */
+function pintarAptos() {
+  const box = $('#aj-aptos'), D = app.edificio.aptos;
+  if (!modeloEd || !(modeloEd.r.espacios || []).length) {
+    box.innerHTML = '<p class="small muted">' + (modeloEd ? 'Este modelo no trae espacios (IfcSpace / rooms de Revit). Expórtalo con los rooms para que los apartamentos se detecten solos.' : '') + '</p>';
+    $('#aj-detectar').hidden = !modeloEd; return;
+  }
+  const ids = (S.unidades || []).map(u => u.id);
+  const ok = D ? D.conectados : 0;
+  let html = `<p class="small"><b>${ok} de ${ids.length}</b> unidades de la sala conectadas con su apartamento en el IFC` + (D && D.como ? ` (por ${esc(D.como)})` : '') + `. ${(modeloEd.r.espacios || []).length} espacios leídos.</p>`;
+  if (D && D.grupos.length) {
+    html += '<div class="aj-lista">' + D.grupos.map(g => `<label><span><b>${esc(g.nombre)}</b><small>${esc(g.piso || '')} · ${g.n} espacios · ${g.area} m²</small></span><select data-clave="${esc(g.clave)}" aria-label="Unidad de la sala para ${esc(g.nombre)}"><option value="">— sin unidad</option>${ids.map(id => `<option${id === g.unidad ? ' selected' : ''}>${esc(id)}</option>`).join('')}</select></label>`).join('') + '</div>';
+    const sin = ids.filter(id => !D.unidades[id]);
+    if (sin.length) html += `<p class="small muted">Sin apartamento en el IFC: ${sin.slice(0, 30).map(esc).join(', ')}${sin.length > 30 ? '…' : ''}. Siguen en la lista de unidades pero no se ven sobre el modelo.</p>`;
+  }
+  box.innerHTML = html;
+  box.querySelectorAll('select[data-clave]').forEach(s => s.onchange = () => {
+    reasignar(app.edificio.aptos, s.dataset.clave, s.value); volumenesIFC(); T.refrescar(sel, hover); pintarAptos();
+    const m = T.unidades.find(x => x.userData.unidad.id === s.value); if (m) seleccionar(m);
+  });
 }
 
 /* ---------- exterior ---------- */
@@ -279,7 +354,7 @@ cv.addEventListener('pointerdown', e => { down = [e.clientX, e.clientY]; });
 cv.addEventListener('pointermove', e => {
   if (modo !== 'ext' || !T) return;
   ray.setFromCamera(ndc(e), cam);
-  const hit = ray.intersectObjects(T.unidades, false)[0], m = hit && hit.object, tip = $('#tip');
+  const hit = ray.intersectObjects(tocables(), false)[0], m = hit && hit.object, tip = $('#tip');
   if (m !== hover) { hover = m || null; T.refrescar(sel, hover); }
   if (m && e.pointerType === 'mouse') {
     const u = m.userData.unidad;
@@ -293,14 +368,14 @@ cv.addEventListener('pointerup', e => {
   if (modo === 'ext' && T) {
     if (document.body.classList.contains('ajustando')) return;
     ray.setFromCamera(ndc(e), cam);
-    const hit = ray.intersectObjects(T.unidades, false)[0];
+    const hit = ray.intersectObjects(tocables(), false)[0];
     if (hit) seleccionar(hit.object);
   } else if (modo === 'int') clicInterior(e);
 });
 cv.addEventListener('dblclick', e => {
   if (modo !== 'ext' || !T || document.body.classList.contains('ajustando')) return;
   ray.setFromCamera(ndc(e), cam);
-  const hit = ray.intersectObjects(T.unidades, false)[0];
+  const hit = ray.intersectObjects(tocables(), false)[0];
   if (hit && hit.object.userData.unidad.estado === 'disponible') entrar(hit.object);
 });
 
@@ -312,8 +387,60 @@ let I = null, unidadInt = null, herramienta = 'walk', maqueta = false, wiz = nul
 const marcas = new THREE.Group(); scene.add(marcas);
 let etiquetas = [];
 
+/* qué modelo se abre al entrar: el que mandó la sala en el link → el elegido en el dashboard →
+   el modelo que la sala le puso al apto o a su planta → el apto recortado del IFC del edificio → el de referencia */
+const ES_MODELO = /\.(ifc|glb|gltf|obj|fbx)(\?|#|$)/i;
+function modeloDe(planta, apto, unidad) {
+  const q = qs.get('modelo');
+  if (q && String(unidad.id) === String(aptoInicial)) return { tipo: 'url', url: q, nombre: q.split(/[?#]/)[0].split('/').pop(), srdb: qs.get('srdb') };
+  const m = app.modelos[planta.id];
+  if (m && m.tipo && m.tipo !== 'auto') return m;
+  const rec = (apto && apto.recorrido) || planta.recorrido;
+  if (rec && ES_MODELO.test(rec)) return { tipo: 'url', url: new URL(rec, app.salaUrl || base).href, nombre: rec.split(/[?#]/)[0].split('/').pop() };
+  if (aptosIFC() && aptosIFC().unidades[unidad.id]) return { tipo: 'edificio' };
+  return { tipo: 'referencia' };
+}
+/* el apartamento dentro del modelo del edificio: se recorta con 6 planos alrededor de sus espacios */
+function recorteEdificio(unidad) {
+  const a = aptosIFC().unidades[unidad.id];
+  const caja = new THREE.Box3();
+  a.cajas.forEach(c => caja.union(new THREE.Box3(new THREE.Vector3(c[0], c[1], c[2]), new THREE.Vector3(c[3], c[4], c[5]))));
+  const s = caja.getSize(new THREE.Vector3()), mg = Math.max(0.3, Math.min(s.x, s.z) * 0.04);
+  const clip = caja.clone(); clip.min.x -= mg; clip.min.z -= mg; clip.max.x += mg; clip.max.z += mg; clip.min.y -= 0.3; clip.max.y += 0.45;
+  const V = (x, y, z) => new THREE.Vector3(x, y, z);
+  const planos = [new THREE.Plane(V(1, 0, 0), -clip.min.x), new THREE.Plane(V(-1, 0, 0), clip.max.x), new THREE.Plane(V(0, 1, 0), -clip.min.y),
+    new THREE.Plane(V(0, -1, 0), clip.max.y), new THREE.Plane(V(0, 0, 1), -clip.min.z), new THREE.Plane(V(0, 0, -1), clip.max.z)];
+  const g = new THREE.Group(), mats = new Map();
+  modeloEd.r.scene.traverse(o => {
+    if (!o.isMesh) return;
+    if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+    if (!o.geometry.boundingBox.intersectsBox(clip)) return;
+    let mt = mats.get(o.material);
+    if (!mt) { mt = o.material.clone(); mt.clippingPlanes = planos; mats.set(o.material, mt); }
+    const c = new THREE.Mesh(o.geometry, mt); c.userData.expressID = o.userData.expressID; g.add(c);
+  });
+  const vistas = {}, cuartos = {}, nombres = {};
+  a.cajas.forEach((c, i) => {
+    const w = c[3] - c[0], d = c[5] - c[2]; if (w < 0.8 || d < 0.8) return;
+    const cx = (c[0] + c[3]) / 2, cz = (c[2] + c[5]) / 2, y = c[1], n = a.nombres[i] || 'Espacio ' + (i + 1), id = 'e' + i;
+    vistas[id] = { n, eye: [cx, y + 1.6, cz], look: w >= d ? [c[3], y + 1.2, cz] : [cx, y + 1.2, c[5]] };
+    cuartos[id] = [c[0], c[3], c[2], c[5]]; nombres[id] = n;
+  });
+  // la sala primero, como en el recorrido de referencia
+  const orden = Object.keys(vistas).sort((x, y) => (claveEspacio(vistas[x].n) === 'sala' ? 0 : 1) - (claveEspacio(vistas[y].n) === 'sala' ? 0 : 1));
+  const vOrd = {}; orden.forEach(k => { vOrd[k] = vistas[k]; });
+  if (!orden.length) { const c = caja.getCenter(V(0, 0, 0)); vOrd.centro = { n: 'Centro', eye: [c.x, caja.min.y + 1.6, c.z], look: [caja.max.x, caja.min.y + 1.3, c.z] }; }
+  return { group: g, vistas: vOrd, cuartos, nombres, piso: caja.min.y, techo: caja.max.y, etiqueta: 'Del modelo del edificio (IFC)', box: caja.clone(), recorte: clip, espacios: [] };
+}
+
 async function cargarTipologia(planta, apto, unidad) {
-  const modelo = app.modelos[planta.id] || { tipo: 'referencia' };
+  const modelo = modeloDe(planta, apto, unidad);
+  if (modelo.tipo === 'edificio') { try { return recorteEdificio(unidad); } catch (e) { console.warn(e); } }
+  if (modelo.srdb) {
+    // modelo subido en el asistente de la sala (mismo navegador): vive en la IndexedDB de la sala
+    const b = await leerSalaDB(modelo.srdb).catch(() => null);
+    if (b) return cargarInterior({ tipo: 'archivo', nombre: modelo.nombre }, { apto, unidad, blob: b, base, esc: T ? T.esc : null });
+  }
   const ctx = { apto, esc: T ? T.esc : null, unidad, paleta: (S.recorrido || {}).paleta, base };
   if (modelo.tipo === 'archivo') ctx.blob = app.key ? await idb.get(app.key + ':' + planta.id) : null;
   if (!ctx.esc) { const { escalaPlantas } = await import('./torre.js'); ctx.esc = escalaPlantas(S); }
@@ -440,7 +567,7 @@ let puntoA = null, pintura = null;
 const originales = new Map();
 function clicInterior(e) {
   ray.setFromCamera(ndc(e), cam);
-  const hit = ray.intersectObject(I.group, true).find(h => !renderer.clippingPlanes.length || h.point.y < I.piso + 2.15);
+  const hit = ray.intersectObject(I.group, true).find(h => (!renderer.clippingPlanes.length || h.point.y < I.piso + 2.15) && (!I.recorte || I.recorte.containsPoint(h.point)));
   if (!hit) return;
   if (wiz && wiz.clic) { wiz.clic(hit); return; }
   if (herramienta === 'walk' && !maqueta) {

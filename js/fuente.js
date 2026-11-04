@@ -171,13 +171,15 @@ export function claveEspacio(n) {
   return 'otro';
 }
 export function appPorDefecto(fuente, S) {
-  const modelos = {}; (S.plantas || []).forEach(p => { modelos[p.id] = { tipo: 'referencia' }; });
-  return completarApp({ v: 2, key: keyDe(fuente), nombre: S.proyecto || 'Mi proyecto', fuente, salaUrl: fuente.tipo === 'demo' ? DEMO_SALA : '', modelos });
+  const modelos = {}; (S.plantas || []).forEach(p => { modelos[p.id] = { tipo: 'auto' }; });
+  return completarApp({ v: 3, key: keyDe(fuente), nombre: S.proyecto || 'Mi proyecto', fuente, salaUrl: fuente.tipo === 'demo' ? DEMO_SALA : '', modelos });
 }
 /* llena lo que falte (apps creadas antes de esta versión) */
 export function completarApp(app) {
   app.torre = Object.assign({ altoPiso: 3, losa: '#ece6dc', fachada: '#2b2a27' }, app.torre);
   app.modelos = app.modelos || {};
+  // v3: "automático" (IFC del edificio → modelo que puso la sala → referencia) reemplaza la referencia por defecto
+  if ((app.v || 0) < 3) { Object.values(app.modelos).forEach(m => { if (m.tipo === 'referencia' && !m.vistas) m.tipo = 'auto'; }); app.v = 3; }
   app.edificio = Object.assign({ tipo: 'ninguno', volumenes: 'siempre' }, app.edificio);
   app.preguntas = app.preguntas || JSON.parse(JSON.stringify(PREGUNTAS));
   app.preguntas.espacios = Object.assign({}, PREGUNTAS.espacios, app.preguntas.espacios);
@@ -235,3 +237,21 @@ export const idb = (() => {
     del: k => run('readwrite', s => { s.delete(k); })
   };
 })();
+
+/* la app 3D guardada en este navegador para una sala (cuando la sala abre el 3D con ?sala=) */
+export function appDeSala(salaUrl) {
+  const d = datosDeSala(salaUrl);
+  return listaApps().find(a => (a.fuente && a.fuente.tipo === 'url' && a.fuente.datos === d) || (a.fuente && a.fuente.tipo === 'demo' && d === DEMO_DATOS)) || null;
+}
+/* archivos que el asistente de la sala guardó en su IndexedDB (mismo origen en GitHub Pages) */
+export function leerSalaDB(key) {
+  return new Promise((res, rej) => {
+    const rq = indexedDB.open('sr-sala-renders', 1);
+    rq.onupgradeneeded = () => rq.result.createObjectStore('files');
+    rq.onerror = () => rej(rq.error);
+    rq.onsuccess = () => {
+      try { const g = rq.result.transaction('files', 'readonly').objectStore('files').get(key); g.onsuccess = () => res(g.result || null); g.onerror = () => rej(g.error); }
+      catch (e) { rej(e); }
+    };
+  });
+}
